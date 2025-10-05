@@ -1,3 +1,4 @@
 streamlit
 edge-tts
-gTTS
+pyttsx3
+pydub
