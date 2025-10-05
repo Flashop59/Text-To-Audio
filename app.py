@@ -1,27 +1,40 @@
 # app.py
-# Hindi/Marathi Text to Speech with improved tone (no API keys, fully free)
-# Works on Streamlit Cloud – no pydub, no pyaudio required
+# Streamlit app: Convert Hindi/Marathi text into realistic 23-year-old female voice (playable + downloadable)
+# Works directly on Streamlit Cloud — no API key needed.
 
 import streamlit as st
 import asyncio
 import edge_tts
-import pyttsx3
 from io import BytesIO
 from datetime import datetime
-import tempfile
 
-st.set_page_config(page_title="🎙️ Hindi/Marathi Text to Speech", page_icon="🎧", layout="centered")
+try:
+    from gtts import gTTS
+    HAS_GTTS = True
+except ImportError:
+    HAS_GTTS = False
 
-st.title("🎧 Hindi / Marathi Text → Voice (Free & Realistic)")
-st.caption("No API key needed — choose online neural or offline TTS engine.")
 
-lang = st.selectbox("Language", ["Hindi (hi-IN)", "Marathi (mr-IN)"])
-engine_choice = st.radio("Voice Engine", ["Edge-TTS (Online Neural)", "Offline (pyttsx3)"])
-text = st.text_area("Enter text", height=200, placeholder="यहाँ हिंदी में लिखें... / येथे मराठी मजकूर लिहा...")
-rate = st.slider("Speed (Rate)", -50, 50, 5)
-pitch = st.slider("Pitch (younger = higher)", -8, 8, 2)
+st.set_page_config(page_title="🎤 Text to Voice - Hindi/Marathi", page_icon="🎧", layout="centered")
 
-# Helper functions
+st.title("🎧 Hindi / Marathi Text to Voice")
+st.caption("Realistic young female voice (~23 y/o). Play or download your audio instantly.")
+
+# --- Input UI ---
+lang = st.selectbox("Select Language", ["Hindi (hi-IN)", "Marathi (mr-IN)"])
+text = st.text_area(
+    "Enter or paste your text below 👇",
+    placeholder="यहाँ हिंदी में टाइप करें... / येथे मराठी मजकूर टाइप करा...",
+    height=200
+)
+rate = st.slider("Voice Speed (rate)", -50, 50, 0)
+pitch = st.slider("Voice Pitch (younger = higher)", -8, 8, 2)
+fallback = st.checkbox("Enable gTTS fallback", value=True)
+
+# --- Helper functions ---
+def timestamped_filename(prefix="voice") -> str:
+    return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
+
 async def pick_female_voice(locale_code: str):
     voices = await edge_tts.VoicesManager.create()
     female = [v for v in voices.voices if v["Locale"] == locale_code and v["Gender"] == "Female"]
@@ -39,49 +52,47 @@ async def synth_edge_tts(text, locale, rate, pitch):
             out.write(chunk["data"])
     return out.getvalue()
 
-def synth_pyttsx3(text, lang):
-    """Offline fallback using system voice (runs locally only)."""
-    engine = pyttsx3.init()
-    voices = engine.getProperty("voices")
-    for v in voices:
-        if ("female" in v.name.lower() or "zira" in v.name.lower()):
-            engine.setProperty("voice", v.id)
-            break
-    engine.setProperty("rate", 170)
-    temp_file = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    engine.save_to_file(text, temp_file.name)
-    engine.runAndWait()
-    with open(temp_file.name, "rb") as f:
-        data = f.read()
-    return data
+def synth_gtts(text, lang_code):
+    if not HAS_GTTS:
+        raise RuntimeError("gTTS not installed.")
+    tts = gTTS(text=text, lang=lang_code)
+    out = BytesIO()
+    tts.write_to_fp(out)
+    return out.getvalue()
 
-def filename(prefix="voice"):
-    from datetime import datetime
-    return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
-
-# Generate audio
-if st.button("Generate 🎙️", use_container_width=True):
+# --- Generate ---
+if st.button("Generate Audio 🎙️", use_container_width=True):
     if not text.strip():
-        st.error("Please enter some text first.")
+        st.error("Please enter some text first!")
     else:
         locale = "hi-IN" if lang.startswith("Hindi") else "mr-IN"
-        st.info(f"Generating using {engine_choice} ...")
-        audio_bytes = None
-        try:
-            if engine_choice == "Edge-TTS (Online Neural)":
+        lang_code = "hi" if locale == "hi-IN" else "mr"
+
+        with st.spinner("Generating voice..."):
+            try:
                 audio_bytes = asyncio.run(synth_edge_tts(text, locale, rate, pitch))
-            else:
-                audio_bytes = synth_pyttsx3(text, locale)
-            st.success("✅ Done! Play or download below:")
+                st.success("✅ Neural voice generated!")
+            except Exception as e:
+                if fallback:
+                    st.warning(f"Edge TTS failed ({e}). Trying gTTS fallback...")
+                    try:
+                        audio_bytes = synth_gtts(text, lang_code)
+                        st.success("✅ gTTS fallback successful!")
+                    except Exception as e2:
+                        st.error(f"Both engines failed: {e2}")
+                        audio_bytes = None
+                else:
+                    st.error(f"Neural TTS failed: {e}")
+                    audio_bytes = None
+
+        if audio_bytes:
             st.audio(audio_bytes, format="audio/mp3")
             st.download_button(
-                "⬇️ Download MP3",
+                label="⬇️ Download MP3",
                 data=audio_bytes,
-                file_name=filename("tts"),
+                file_name=timestamped_filename("tts"),
                 mime="audio/mpeg"
             )
-        except Exception as e:
-            st.error(f"Error: {e}")
 
 st.markdown("---")
-st.caption("💡 Tip: Use Edge-TTS for smoother voice (requires internet). Offline voice works locally but not on Streamlit Cloud.")
+st.caption("💡 Tip: Use slightly faster (+8) and higher pitch (+2~+3) for a youthful 23-year-old tone.")
