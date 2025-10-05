@@ -1,6 +1,6 @@
 # app.py
-# Hindi/Marathi Text to Speech with improved naturalness (no API keys)
-# Combines edge-tts + pyttsx3 (offline) + audio smoothing
+# Hindi/Marathi Text to Speech with improved tone (no API keys, fully free)
+# Works on Streamlit Cloud – no pydub, no pyaudio required
 
 import streamlit as st
 import asyncio
@@ -8,28 +8,20 @@ import edge_tts
 import pyttsx3
 from io import BytesIO
 from datetime import datetime
-from pydub import AudioSegment, effects
 import tempfile
 
-st.set_page_config(page_title="🎙️ Realistic Hindi/Marathi TTS", page_icon="🎧", layout="centered")
+st.set_page_config(page_title="🎙️ Hindi/Marathi Text to Speech", page_icon="🎧", layout="centered")
 
 st.title("🎧 Hindi / Marathi Text → Voice (Free & Realistic)")
-st.caption("Enhanced realism using neural edge-tts or offline pyttsx3, no API key required.")
+st.caption("No API key needed — choose online neural or offline TTS engine.")
 
 lang = st.selectbox("Language", ["Hindi (hi-IN)", "Marathi (mr-IN)"])
 engine_choice = st.radio("Voice Engine", ["Edge-TTS (Online Neural)", "Offline (pyttsx3)"])
 text = st.text_area("Enter text", height=200, placeholder="यहाँ हिंदी में लिखें... / येथे मराठी मजकूर लिहा...")
 rate = st.slider("Speed (Rate)", -50, 50, 5)
-pitch = st.slider("Pitch (younger voice = higher)", -8, 8, 2)
+pitch = st.slider("Pitch (younger = higher)", -8, 8, 2)
 
-def normalize_audio(audio_bytes: bytes) -> bytes:
-    """Normalize volume for smoother playback"""
-    audio = AudioSegment.from_file(BytesIO(audio_bytes), format="mp3")
-    normalized = effects.normalize(audio)
-    out_buf = BytesIO()
-    normalized.export(out_buf, format="mp3")
-    return out_buf.getvalue()
-
+# Helper functions
 async def pick_female_voice(locale_code: str):
     voices = await edge_tts.VoicesManager.create()
     female = [v for v in voices.voices if v["Locale"] == locale_code and v["Gender"] == "Female"]
@@ -48,15 +40,14 @@ async def synth_edge_tts(text, locale, rate, pitch):
     return out.getvalue()
 
 def synth_pyttsx3(text, lang):
-    """Offline fallback using system voice (no internet)."""
+    """Offline fallback using system voice (runs locally only)."""
     engine = pyttsx3.init()
     voices = engine.getProperty("voices")
-    # Try selecting Indian female voice if available
     for v in voices:
-        if ("female" in v.name.lower() or "zira" in v.name.lower()) and ("hi" in v.id.lower() or "marathi" in v.id.lower()):
+        if ("female" in v.name.lower() or "zira" in v.name.lower()):
             engine.setProperty("voice", v.id)
             break
-    engine.setProperty("rate", 170)  # slow, clear tone
+    engine.setProperty("rate", 170)
     temp_file = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     engine.save_to_file(text, temp_file.name)
     engine.runAndWait()
@@ -65,21 +56,22 @@ def synth_pyttsx3(text, lang):
     return data
 
 def filename(prefix="voice"):
+    from datetime import datetime
     return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
 
+# Generate audio
 if st.button("Generate 🎙️", use_container_width=True):
     if not text.strip():
         st.error("Please enter some text first.")
     else:
         locale = "hi-IN" if lang.startswith("Hindi") else "mr-IN"
-        st.info(f"Generating voice using {engine_choice}...")
+        st.info(f"Generating using {engine_choice} ...")
         audio_bytes = None
         try:
             if engine_choice == "Edge-TTS (Online Neural)":
                 audio_bytes = asyncio.run(synth_edge_tts(text, locale, rate, pitch))
             else:
                 audio_bytes = synth_pyttsx3(text, locale)
-            audio_bytes = normalize_audio(audio_bytes)
             st.success("✅ Done! Play or download below:")
             st.audio(audio_bytes, format="audio/mp3")
             st.download_button(
@@ -92,4 +84,4 @@ if st.button("Generate 🎙️", use_container_width=True):
             st.error(f"Error: {e}")
 
 st.markdown("---")
-st.caption("💡 Tip: Use Edge-TTS for smoother, more natural voice (needs internet). Use Offline if network restricted.")
+st.caption("💡 Tip: Use Edge-TTS for smoother voice (requires internet). Offline voice works locally but not on Streamlit Cloud.")
